@@ -17,7 +17,7 @@ const router = Router();
 // ============================================
 
 // Your Apple app bundle ID (audience for Apple tokens)
-const APPLE_BUNDLE_ID = process.env.APPLE_BUNDLE_ID || 'com.savr.app';
+const APPLE_BUNDLE_ID = process.env.APPLE_BUNDLE_ID || 'ZenziAI.KULA';
 
 // Your Google OAuth client ID (audience for Google tokens)
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
