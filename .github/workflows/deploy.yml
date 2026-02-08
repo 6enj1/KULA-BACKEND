@@ -31,6 +31,7 @@ jobs:
               -e "JWT_REFRESH_SECRET=${{ secrets.JWT_REFRESH_SECRET }}" \
               -e "YOCO_SECRET_KEY=${{ secrets.YOCO_SECRET_KEY }}" \
               -e "YOCO_WEBHOOK_SECRET=${{ secrets.YOCO_WEBHOOK_SECRET }}" \
+              -e "GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}" \
               kula-backend
             sleep 5
             curl -f http://localhost:3000/health || echo "Health check failed"
