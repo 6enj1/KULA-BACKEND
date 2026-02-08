@@ -1,0 +1,36 @@
+name: Deploy to AWS
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ec2-user
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            cd /home/ec2-user/kula-backend
+            git pull origin main
+            sudo docker build -t kula-backend .
+            sudo docker rm -f kula-backend || true
+            sudo docker run -d \
+              --name kula-backend \
+              --restart unless-stopped \
+              -p 3000:3000 \
+              -e "DATABASE_URL=${{ secrets.DATABASE_URL }}" \
+              -e NODE_ENV=production \
+              -e PORT=3000 \
+              -e "JWT_SECRET=${{ secrets.JWT_SECRET }}" \
+              -e "JWT_REFRESH_SECRET=${{ secrets.JWT_REFRESH_SECRET }}" \
+              -e "YOCO_SECRET_KEY=${{ secrets.YOCO_SECRET_KEY }}" \
+              -e "YOCO_WEBHOOK_SECRET=${{ secrets.YOCO_WEBHOOK_SECRET }}" \
+              kula-backend
+            sleep 5
+            curl -f http://localhost:3000/health || echo "Health check failed"

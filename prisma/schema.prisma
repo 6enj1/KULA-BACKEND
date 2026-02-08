@@ -1,0 +1,637 @@
+// SAVR Backend - Prisma Schema
+// Food Surplus Marketplace Database
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================
+// ENUMS
+// ============================================
+
+enum UserRole {
+  consumer
+  business
+  admin
+}
+
+enum OrderStatus {
+  pending
+  paid
+  ready
+  collected
+  cancelled
+  refunded
+}
+
+enum PaymentStatus {
+  pending
+  succeeded
+  failed
+  refunded
+}
+
+enum PaymentMethod {
+  apple_pay
+  google_pay
+  card
+}
+
+enum PayoutStatus {
+  pending
+  processing
+  completed
+  failed
+}
+
+enum AddressType {
+  home
+  work
+  other
+}
+
+enum DayOfWeek {
+  monday
+  tuesday
+  wednesday
+  thursday
+  friday
+  saturday
+  sunday
+}
+
+// ============================================
+// USERS
+// ============================================
+
+model User {
+  id                   String    @id @default(uuid())
+  role                 UserRole  @default(consumer)
+  email                String    @unique
+  emailVerified        Boolean   @default(false) @map("email_verified")
+  passwordHash         String?   @map("password_hash")
+  name                 String
+  phone                String?
+  phoneVerified        Boolean   @default(false) @map("phone_verified")
+  avatarUrl            String?   @map("avatar_url")
+
+  // DEPRECATED: Legacy social auth fields - DO NOT READ, write-only for backward compatibility
+  // These will be removed in a future migration after cutover is complete
+  // Use auth_identities table as the SINGLE SOURCE OF TRUTH for provider identities
+  // See: scripts/migrate-auth-identities.ts for backfill migration
+  appleId              String?   @unique @map("apple_id")
+  googleId             String?   @unique @map("google_id")
+
+  // Auth identities - SINGLE SOURCE OF TRUTH for all provider linking
+  authIdentities       AuthIdentity[]
+
+  // Consumer-specific
+  preferences          String[]  @default([])
+  loyaltyPoints        Int       @default(0) @map("loyalty_points")
+
+  // Location (stored as lat/lng for simplicity, PostGIS can be added later)
+  latitude             Float?
+  longitude            Float?
+  locationUpdatedAt    DateTime? @map("location_updated_at")
+
+  // Push notifications
+  fcmToken             String?   @map("fcm_token")
+  notificationsEnabled Boolean   @default(true) @map("notifications_enabled")
+
+  // Timestamps
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+  deletedAt            DateTime? @map("deleted_at")
+
+  // Relations
+  restaurant           Restaurant?
+  orders               Order[]
+  reviews              Review[]
+  favorites            Favorite[]
+  addresses            Address[]
+  recentSearches       RecentSearch[]
+  refreshTokens        RefreshToken[]
+  notifications        Notification[]
+  cancelledOrders      Order[]   @relation("CancelledBy")
+
+  @@index([email])
+  @@index([role])
+  @@index([appleId])
+  @@index([googleId])
+  @@map("users")
+}
+
+// ============================================
+// AUTH IDENTITIES (Provider Linking)
+// ============================================
+
+enum AuthProvider {
+  email
+  apple
+  google
+}
+
+model AuthIdentity {
+  id              String       @id @default(uuid())
+  userId          String       @map("user_id")
+  provider        AuthProvider
+  providerUserId  String       @map("provider_user_id")  // Stable ID from provider (sub claim)
+  email           String?                                 // Email from this provider (may differ from user.email)
+  refreshToken    String?      @map("refresh_token")      // Provider refresh token if available
+  accessToken     String?      @map("access_token")       // Provider access token if available
+  tokenExpiresAt  DateTime?    @map("token_expires_at")
+  rawProfile      Json?        @map("raw_profile")        // Full profile data from provider
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+
+  user            User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerUserId])  // One identity per provider+user combo
+  @@unique([userId, provider])          // One provider type per user
+  @@index([userId])
+  @@index([provider, email])            // For lookup by provider email
+  @@map("auth_identities")
+}
+
+// ============================================
+// CATEGORIES
+// ============================================
+
+model Category {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  slug        String   @unique
+  icon        String
+  emoji       String?
+  sortOrder   Int      @default(0) @map("sort_order")
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  // Relations
+  restaurants RestaurantCategory[]
+
+  @@index([isActive, sortOrder])
+  @@map("categories")
+}
+
+// ============================================
+// RESTAURANTS (Business Profiles)
+// ============================================
+
+model Restaurant {
+  id               String    @id @default(uuid())
+  ownerId          String    @unique @map("owner_id")
+
+  // Basic Info
+  name             String
+  slug             String    @unique
+  description      String?
+
+  // Branding
+  logoUrl          String?   @map("logo_url")
+  heroImageUrl     String?   @map("hero_image_url")
+  photos           String[]  @default([])
+
+  // Location
+  addressLine1     String    @map("address_line1")
+  addressLine2     String?   @map("address_line2")
+  city             String
+  province         String
+  postalCode       String    @map("postal_code")
+  country          String    @default("ZA")
+  latitude         Float
+  longitude        Float
+
+  // Contact
+  phone            String?
+  email            String?
+  website          String?
+
+  // Ratings (denormalized)
+  ratingAvg        Float     @default(0) @map("rating_avg")
+  ratingCount      Int       @default(0) @map("rating_count")
+
+  // Settings
+  isActive         Boolean   @default(false) @map("is_active")
+  isVerified       Boolean   @default(false) @map("is_verified")
+  autoAcceptOrders Boolean   @default(true) @map("auto_accept_orders")
+
+  // Payments
+  stripeAccountId  String?   @map("stripe_account_id")
+  payoutEnabled    Boolean   @default(false) @map("payout_enabled")
+
+  // Timestamps
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+  deletedAt        DateTime? @map("deleted_at")
+
+  // Relations
+  owner            User      @relation(fields: [ownerId], references: [id])
+  categories       RestaurantCategory[]
+  openingHours     OpeningHours[]
+  bags             Bag[]
+  orders           Order[]
+  reviews          Review[]
+  payouts          Payout[]
+
+  @@index([ownerId])
+  @@index([isActive])
+  @@index([slug])
+  @@map("restaurants")
+}
+
+// ============================================
+// RESTAURANT CATEGORIES (Junction)
+// ============================================
+
+model RestaurantCategory {
+  restaurantId String     @map("restaurant_id")
+  categoryId   String     @map("category_id")
+
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  category     Category   @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([restaurantId, categoryId])
+  @@index([categoryId])
+  @@map("restaurant_categories")
+}
+
+// ============================================
+// OPENING HOURS
+// ============================================
+
+model OpeningHours {
+  id           String     @id @default(uuid())
+  restaurantId String     @map("restaurant_id")
+  dayOfWeek    DayOfWeek  @map("day_of_week")
+  openTime     String     @map("open_time")  // "09:00"
+  closeTime    String     @map("close_time") // "21:00"
+  isClosed     Boolean    @default(false) @map("is_closed")
+
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@unique([restaurantId, dayOfWeek])
+  @@index([restaurantId])
+  @@map("opening_hours")
+}
+
+// ============================================
+// BAGS (Surprise Bags - Main Product)
+// ============================================
+
+model Bag {
+  id                String     @id @default(uuid())
+  restaurantId      String     @map("restaurant_id")
+
+  // Product Info
+  title             String
+  description       String
+  foodType          String     @map("food_type")
+
+  // Pricing (stored in cents)
+  priceOriginal     Int        @map("price_original")
+  priceCurrent      Int        @map("price_current")
+
+  // Inventory
+  quantityTotal     Int        @map("quantity_total")
+  quantityRemaining Int        @map("quantity_remaining")
+
+  // Pickup Window
+  pickupStart       DateTime   @map("pickup_start")
+  pickupEnd         DateTime   @map("pickup_end")
+
+  // Attributes
+  badges            String[]   @default([])
+  allergens         String[]   @default([])
+  dietaryInfo       String[]   @default([]) @map("dietary_info")
+
+  // Media
+  imageUrl          String?    @map("image_url")
+
+  // Status
+  isActive          Boolean    @default(true) @map("is_active")
+  isSoldOut         Boolean    @default(false) @map("is_sold_out")
+
+  // Timestamps
+  createdAt         DateTime   @default(now()) @map("created_at")
+  updatedAt         DateTime   @updatedAt @map("updated_at")
+
+  // Relations
+  restaurant        Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  orders            Order[]
+  favorites         Favorite[]
+
+  @@index([restaurantId])
+  @@index([isActive, isSoldOut])
+  @@index([pickupStart, pickupEnd])
+  @@index([foodType])
+  @@map("bags")
+}
+
+// ============================================
+// ORDERS
+// ============================================
+
+model Order {
+  id                 String      @id @default(uuid())
+  orderNumber        String      @unique @map("order_number")
+
+  // Relations
+  userId             String      @map("user_id")
+  bagId              String      @map("bag_id")
+  restaurantId       String      @map("restaurant_id")
+
+  // Order Details
+  quantity           Int         @default(1)
+
+  // Pricing (cents)
+  subtotal           Int
+  platformFee        Int         @default(250) @map("platform_fee")
+  total              Int
+
+  // Status
+  status             OrderStatus @default(pending)
+
+  // Pickup
+  pickupStart        DateTime    @map("pickup_start")
+  pickupEnd          DateTime    @map("pickup_end")
+  qrCode             String      @unique @map("qr_code")
+  qrScannedAt        DateTime?   @map("qr_scanned_at")
+
+  // Customer Actions
+  customerArrivedAt  DateTime?   @map("customer_arrived_at")
+
+  // Cancellation
+  cancelledAt        DateTime?   @map("cancelled_at")
+  cancellationReason String?     @map("cancellation_reason")
+  cancelledById      String?     @map("cancelled_by_id")
+
+  // Timestamps
+  createdAt          DateTime    @default(now()) @map("created_at")
+  updatedAt          DateTime    @updatedAt @map("updated_at")
+
+  // Relations
+  user               User        @relation(fields: [userId], references: [id])
+  bag                Bag         @relation(fields: [bagId], references: [id])
+  restaurant         Restaurant  @relation(fields: [restaurantId], references: [id])
+  cancelledBy        User?       @relation("CancelledBy", fields: [cancelledById], references: [id])
+  payment            Payment?
+  review             Review?
+
+  @@index([userId])
+  @@index([restaurantId])
+  @@index([bagId])
+  @@index([status])
+  @@index([pickupStart, pickupEnd])
+  @@index([createdAt(sort: Desc)])
+  @@map("orders")
+}
+
+// ============================================
+// PAYMENTS
+// ============================================
+
+model Payment {
+  id                     String        @id @default(uuid())
+  orderId                String        @unique @map("order_id")
+
+  // Payment Info
+  amount                 Int
+  currency               String        @default("ZAR")
+  method                 PaymentMethod
+  status                 PaymentStatus @default(pending)
+
+  // Stripe
+  stripePaymentIntentId  String?       @map("stripe_payment_intent_id")
+  stripeChargeId         String?       @map("stripe_charge_id")
+
+  // Card Details (masked)
+  cardLast4              String?       @map("card_last4")
+  cardBrand              String?       @map("card_brand")
+
+  // Timestamps
+  paidAt                 DateTime?     @map("paid_at")
+  failedAt               DateTime?     @map("failed_at")
+  failureReason          String?       @map("failure_reason")
+
+  // Refund
+  refundedAt             DateTime?     @map("refunded_at")
+  refundAmount           Int?          @map("refund_amount")
+  refundReason           String?       @map("refund_reason")
+  stripeRefundId         String?       @map("stripe_refund_id")
+
+  createdAt              DateTime      @default(now()) @map("created_at")
+  updatedAt              DateTime      @updatedAt @map("updated_at")
+
+  // Relations
+  order                  Order         @relation(fields: [orderId], references: [id])
+
+  @@index([status])
+  @@index([stripePaymentIntentId])
+  @@map("payments")
+}
+
+// ============================================
+// REVIEWS
+// ============================================
+
+model Review {
+  id            String     @id @default(uuid())
+  orderId       String     @unique @map("order_id")
+  userId        String     @map("user_id")
+  restaurantId  String     @map("restaurant_id")
+
+  rating        Int
+  text          String?
+
+  // Moderation
+  isVisible     Boolean    @default(true) @map("is_visible")
+  flaggedAt     DateTime?  @map("flagged_at")
+  flaggedReason String?    @map("flagged_reason")
+
+  createdAt     DateTime   @default(now()) @map("created_at")
+  updatedAt     DateTime   @updatedAt @map("updated_at")
+
+  // Relations
+  order         Order      @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  user          User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  restaurant    Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([restaurantId])
+  @@index([rating])
+  @@map("reviews")
+}
+
+// ============================================
+// FAVORITES
+// ============================================
+
+model Favorite {
+  userId    String   @map("user_id")
+  bagId     String   @map("bag_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bag       Bag      @relation(fields: [bagId], references: [id], onDelete: Cascade)
+
+  @@id([userId, bagId])
+  @@index([bagId])
+  @@map("favorites")
+}
+
+// ============================================
+// SAVED ADDRESSES
+// ============================================
+
+model Address {
+  id           String      @id @default(uuid())
+  userId       String      @map("user_id")
+
+  label        String
+  addressType  AddressType @default(other) @map("address_type")
+
+  addressLine1 String      @map("address_line1")
+  addressLine2 String?     @map("address_line2")
+  city         String
+  province     String
+  postalCode   String      @map("postal_code")
+  country      String      @default("ZA")
+
+  latitude     Float?
+  longitude    Float?
+
+  isDefault    Boolean     @default(false) @map("is_default")
+
+  createdAt    DateTime    @default(now()) @map("created_at")
+  updatedAt    DateTime    @updatedAt @map("updated_at")
+
+  user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, isDefault])
+  @@map("addresses")
+}
+
+// ============================================
+// RECENT SEARCHES
+// ============================================
+
+model RecentSearch {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  query     String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, query])
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("recent_searches")
+}
+
+// ============================================
+// BUSINESS PAYOUTS
+// ============================================
+
+model Payout {
+  id               String       @id @default(uuid())
+  restaurantId     String       @map("restaurant_id")
+
+  amount           Int
+  currency         String       @default("ZAR")
+  status           PayoutStatus @default(pending)
+
+  // Period
+  periodStart      DateTime     @map("period_start")
+  periodEnd        DateTime     @map("period_end")
+
+  // Orders included
+  orderCount       Int          @map("order_count")
+  grossAmount      Int          @map("gross_amount")
+  platformFees     Int          @map("platform_fees")
+  netAmount        Int          @map("net_amount")
+
+  // Stripe
+  stripeTransferId String?      @map("stripe_transfer_id")
+
+  processedAt      DateTime?    @map("processed_at")
+  failedAt         DateTime?    @map("failed_at")
+  failureReason    String?      @map("failure_reason")
+
+  createdAt        DateTime     @default(now()) @map("created_at")
+
+  restaurant       Restaurant   @relation(fields: [restaurantId], references: [id])
+
+  @@index([restaurantId])
+  @@index([status])
+  @@index([periodStart, periodEnd])
+  @@map("payouts")
+}
+
+// ============================================
+// REFRESH TOKENS
+// ============================================
+
+model RefreshToken {
+  id         String    @id @default(uuid())
+  userId     String    @map("user_id")
+  tokenHash  String    @unique @map("token_hash")
+  deviceInfo String?   @map("device_info")
+  ipAddress  String?   @map("ip_address")
+  expiresAt  DateTime  @map("expires_at")
+  revokedAt  DateTime? @map("revoked_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+// ============================================
+// NOTIFICATIONS
+// ============================================
+
+model Notification {
+  id      String    @id @default(uuid())
+  userId  String    @map("user_id")
+  type    String
+  title   String
+  body    String
+  data    Json?
+  readAt  DateTime? @map("read_at")
+  sentAt  DateTime  @default(now()) @map("sent_at")
+
+  user    User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, sentAt(sort: Desc)])
+  @@map("notifications")
+}
+
+// ============================================
+// AUDIT LOGS
+// ============================================
+
+model AuditLog {
+  id           String   @id @default(uuid())
+  userId       String?  @map("user_id")
+  action       String
+  resourceType String   @map("resource_type")
+  resourceId   String?  @map("resource_id")
+  oldValues    Json?    @map("old_values")
+  newValues    Json?    @map("new_values")
+  ipAddress    String?  @map("ip_address")
+  userAgent    String?  @map("user_agent")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@index([resourceType, resourceId])
+  @@index([createdAt(sort: Desc)])
+  @@map("audit_logs")
+}
