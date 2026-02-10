@@ -18,6 +18,7 @@ sudo docker run -d \
   -e 'GOOGLE_CLIENT_ID=503355923468-udjsnlm70nliks55r6ifome82gqiteom.apps.googleusercontent.com' \
   -e 'APPLE_BUNDLE_ID=ZenziAI.KULA' \
   -e 'YOCO_SECRET_KEY=sk_test_5fe5aa1ay8Z3kpW930c469c8462d' \
+  -e 'APP_URL=http://16.28.50.65:3000' \
   --restart unless-stopped \
   kula-backend npx tsx src/index.ts
 
