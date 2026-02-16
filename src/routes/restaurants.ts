@@ -253,6 +253,7 @@ router.post('/', authenticate, requireRole('business'), async (req: Authenticate
       name,
       slug,
       description,
+      isActive: true,
       addressLine1,
       addressLine2,
       city,
