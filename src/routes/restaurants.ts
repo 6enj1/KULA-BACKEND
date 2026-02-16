@@ -86,6 +86,207 @@ router.get('/', optionalAuth, async (req: AuthenticatedRequest, res: Response) =
   res.json({ success: true, data: filtered });
 });
 
+// GET /api/v1/restaurants/mine (MUST be before /:id to avoid matching "mine" as an ID)
+router.get('/mine', authenticate, requireRole('business'), async (req: AuthenticatedRequest, res: Response) => {
+  // Try by ownerId first, fall back to restaurantId from JWT if available
+  let restaurant = await prisma.restaurant.findUnique({
+    where: { ownerId: req.user!.sub },
+    include: {
+      categories: {
+        select: {
+          category: {
+            select: { id: true, name: true, icon: true, emoji: true },
+          },
+        },
+      },
+      openingHours: true,
+    },
+  });
+
+  if (!restaurant && req.user!.restaurantId) {
+    restaurant = await prisma.restaurant.findUnique({
+      where: { id: req.user!.restaurantId },
+      include: {
+        categories: {
+          select: {
+            category: {
+              select: { id: true, name: true, icon: true, emoji: true },
+            },
+          },
+        },
+        openingHours: true,
+      },
+    });
+  }
+
+  if (!restaurant) {
+    return res.status(404).json({ success: false, error: 'Restaurant not found. Complete onboarding first.' });
+  }
+
+  res.json({
+    success: true,
+    data: {
+      ...restaurant,
+      categories: restaurant.categories.map(c => c.category),
+    },
+  });
+});
+
+// PATCH /api/v1/restaurants/mine (Update own restaurant profile)
+router.patch('/mine', authenticate, requireRole('business'), async (req: AuthenticatedRequest, res: Response) => {
+  let restaurant = await prisma.restaurant.findUnique({
+    where: { ownerId: req.user!.sub },
+    select: { id: true },
+  });
+
+  if (!restaurant && req.user!.restaurantId) {
+    restaurant = await prisma.restaurant.findUnique({
+      where: { id: req.user!.restaurantId },
+      select: { id: true },
+    });
+  }
+
+  if (!restaurant) {
+    return res.status(404).json({ success: false, error: 'Restaurant not found' });
+  }
+
+  const {
+    name, description, addressLine1, addressLine2, city, province, postalCode,
+    latitude, longitude, phone, email, website, logoUrl, heroImageUrl, photos,
+    categoryIds,
+  } = req.body;
+
+  const updateData: any = {};
+  if (name !== undefined) updateData.name = name;
+  if (description !== undefined) updateData.description = description;
+  if (addressLine1 !== undefined) updateData.addressLine1 = addressLine1;
+  if (addressLine2 !== undefined) updateData.addressLine2 = addressLine2;
+  if (city !== undefined) updateData.city = city;
+  if (province !== undefined) updateData.province = province;
+  if (postalCode !== undefined) updateData.postalCode = postalCode;
+  if (latitude !== undefined) updateData.latitude = latitude;
+  if (longitude !== undefined) updateData.longitude = longitude;
+  if (phone !== undefined) updateData.phone = phone;
+  if (email !== undefined) updateData.email = email;
+  if (website !== undefined) updateData.website = website;
+  if (logoUrl !== undefined) updateData.logoUrl = logoUrl;
+  if (heroImageUrl !== undefined) updateData.heroImageUrl = heroImageUrl;
+  if (photos !== undefined) updateData.photos = photos;
+
+  // Handle category updates
+  if (categoryIds !== undefined) {
+    await prisma.restaurantCategory.deleteMany({
+      where: { restaurantId: restaurant.id },
+    });
+    if (categoryIds.length > 0) {
+      await prisma.restaurantCategory.createMany({
+        data: categoryIds.map((categoryId: string) => ({
+          restaurantId: restaurant.id,
+          categoryId,
+        })),
+      });
+    }
+  }
+
+  const updated = await prisma.restaurant.update({
+    where: { id: restaurant.id },
+    data: updateData,
+    include: {
+      categories: {
+        select: {
+          category: {
+            select: { id: true, name: true, icon: true, emoji: true },
+          },
+        },
+      },
+      openingHours: true,
+    },
+  });
+
+  res.json({
+    success: true,
+    data: {
+      ...updated,
+      categories: updated.categories.map(c => c.category),
+    },
+  });
+});
+
+// POST /api/v1/restaurants (Business onboarding - moved before /:id)
+router.post('/', authenticate, requireRole('business'), async (req: AuthenticatedRequest, res: Response) => {
+  const {
+    name, description, addressLine1, addressLine2, city, province, postalCode,
+    latitude, longitude, phone, email, website, categoryIds,
+  } = req.body;
+
+  // Check if user already has a restaurant
+  let existing = await prisma.restaurant.findUnique({
+    where: { ownerId: req.user!.sub },
+  });
+
+  if (!existing && req.user!.restaurantId) {
+    existing = await prisma.restaurant.findUnique({
+      where: { id: req.user!.restaurantId },
+    });
+  }
+
+  if (existing) {
+    return res.status(409).json({ success: false, error: 'You already have a restaurant' });
+  }
+
+  // Validate required fields
+  if (!name || !addressLine1 || !city || !province || !postalCode || !latitude || !longitude) {
+    return res.status(400).json({ success: false, error: 'Missing required fields' });
+  }
+
+  // Generate slug
+  const baseSlug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+  let slug = baseSlug;
+  let counter = 1;
+  while (await prisma.restaurant.findUnique({ where: { slug } })) {
+    slug = `${baseSlug}-${counter++}`;
+  }
+
+  const newRestaurant = await prisma.restaurant.create({
+    data: {
+      ownerId: req.user!.sub,
+      name,
+      slug,
+      description,
+      addressLine1,
+      addressLine2,
+      city,
+      province,
+      postalCode,
+      latitude,
+      longitude,
+      phone,
+      email,
+      website,
+      categories: categoryIds?.length ? {
+        create: categoryIds.map((categoryId: string) => ({ categoryId })),
+      } : undefined,
+    },
+    include: {
+      categories: {
+        select: {
+          category: {
+            select: { id: true, name: true, icon: true },
+          },
+        },
+      },
+    },
+  });
+
+  res.status(201).json({
+    success: true,
+    data: {
+      ...newRestaurant,
+      categories: newRestaurant.categories.map(c => c.category),
+    },
+  });
+});
+
 // GET /api/v1/restaurants/:id
 router.get('/:id', optionalAuth, async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;
@@ -229,104 +430,6 @@ router.get('/:id/reviews', async (req: AuthenticatedRequest, res: Response) => {
       total,
       totalPages: Math.ceil(total / Number(limit)),
       hasMore: Number(page) * Number(limit) < total,
-    },
-  });
-});
-
-// POST /api/v1/restaurants (Business onboarding)
-router.post('/', authenticate, requireRole('business'), async (req: AuthenticatedRequest, res: Response) => {
-  const {
-    name, description, addressLine1, addressLine2, city, province, postalCode,
-    latitude, longitude, phone, email, website, categoryIds,
-  } = req.body;
-
-  // Check if user already has a restaurant
-  const existing = await prisma.restaurant.findUnique({
-    where: { ownerId: req.user!.sub },
-  });
-
-  if (existing) {
-    return res.status(409).json({ success: false, error: 'You already have a restaurant' });
-  }
-
-  // Validate required fields
-  if (!name || !addressLine1 || !city || !province || !postalCode || !latitude || !longitude) {
-    return res.status(400).json({ success: false, error: 'Missing required fields' });
-  }
-
-  // Generate slug
-  const baseSlug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-  let slug = baseSlug;
-  let counter = 1;
-  while (await prisma.restaurant.findUnique({ where: { slug } })) {
-    slug = `${baseSlug}-${counter++}`;
-  }
-
-  const restaurant = await prisma.restaurant.create({
-    data: {
-      ownerId: req.user!.sub,
-      name,
-      slug,
-      description,
-      addressLine1,
-      addressLine2,
-      city,
-      province,
-      postalCode,
-      latitude,
-      longitude,
-      phone,
-      email,
-      website,
-      categories: categoryIds?.length ? {
-        create: categoryIds.map((categoryId: string) => ({ categoryId })),
-      } : undefined,
-    },
-    include: {
-      categories: {
-        select: {
-          category: {
-            select: { id: true, name: true, icon: true },
-          },
-        },
-      },
-    },
-  });
-
-  res.status(201).json({
-    success: true,
-    data: {
-      ...restaurant,
-      categories: restaurant.categories.map(c => c.category),
-    },
-  });
-});
-
-// GET /api/v1/restaurants/mine
-router.get('/mine', authenticate, requireRole('business'), async (req: AuthenticatedRequest, res: Response) => {
-  const restaurant = await prisma.restaurant.findUnique({
-    where: { ownerId: req.user!.sub },
-    include: {
-      categories: {
-        select: {
-          category: {
-            select: { id: true, name: true, icon: true, emoji: true },
-          },
-        },
-      },
-      openingHours: true,
-    },
-  });
-
-  if (!restaurant) {
-    return res.status(404).json({ success: false, error: 'Restaurant not found. Complete onboarding first.' });
-  }
-
-  res.json({
-    success: true,
-    data: {
-      ...restaurant,
-      categories: restaurant.categories.map(c => c.category),
     },
   });
 });

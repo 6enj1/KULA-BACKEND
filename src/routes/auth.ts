@@ -415,9 +415,15 @@ router.post('/register', validate(registerSchema), async (req: AuthenticatedRequ
 
         const passwordHash = await bcrypt.hash(password, 12);
 
+        // Also upgrade role if registering as business
+        const updateData: any = { passwordHash };
+        if (role === 'business') {
+          updateData.role = 'business';
+        }
+
         const updatedUser = await prisma.user.update({
           where: { id: existingUser.id },
-          data: { passwordHash },
+          data: updateData,
           select: {
             id: true,
             email: true,

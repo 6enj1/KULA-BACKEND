@@ -8,6 +8,54 @@ const router = Router();
 // All routes require business role
 router.use(authenticate, requireRole('business'));
 
+// GET /api/v1/business/bags
+router.get('/bags', async (req: AuthenticatedRequest, res: Response) => {
+  const restaurant = await prisma.restaurant.findUnique({
+    where: { ownerId: req.user!.sub },
+    select: { id: true },
+  });
+
+  if (!restaurant) {
+    return res.status(404).json({ success: false, error: 'Restaurant not found' });
+  }
+
+  const bags = await prisma.bag.findMany({
+    where: { restaurantId: restaurant.id },
+    orderBy: { createdAt: 'desc' },
+    select: {
+      id: true,
+      title: true,
+      description: true,
+      foodType: true,
+      priceOriginal: true,
+      priceCurrent: true,
+      quantityTotal: true,
+      quantityRemaining: true,
+      pickupStart: true,
+      pickupEnd: true,
+      badges: true,
+      allergens: true,
+      dietaryInfo: true,
+      imageUrl: true,
+      isActive: true,
+      isSoldOut: true,
+      createdAt: true,
+      _count: {
+        select: { orders: true },
+      },
+    },
+  });
+
+  const bagsWithStats = bags.map(bag => ({
+    ...bag,
+    totalOrders: bag._count.orders,
+    _count: undefined,
+    savingsPercent: Math.round((1 - bag.priceCurrent / bag.priceOriginal) * 100),
+  }));
+
+  res.json({ success: true, data: bagsWithStats });
+});
+
 // GET /api/v1/business/orders
 router.get('/orders', async (req: AuthenticatedRequest, res: Response) => {
   const { status, limit = 20, page = 1 } = req.query;

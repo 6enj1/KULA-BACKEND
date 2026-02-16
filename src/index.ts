@@ -5,6 +5,8 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import compression from 'compression';
 import rateLimit from 'express-rate-limit';
+import path from 'path';
+import fs from 'fs';
 
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import prisma from './utils/prisma';
@@ -40,6 +42,7 @@ import addressRoutes from './routes/addresses';
 import searchRoutes from './routes/search';
 import businessRoutes from './routes/business';
 import paymentRoutes from './routes/payments';
+import uploadRoutes from './routes/uploads';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -105,6 +108,13 @@ app.get('/health', async (req, res) => {
   }
 });
 
+// Serve uploaded files
+const uploadDir = path.join(process.cwd(), 'uploads');
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
+app.use('/uploads', express.static(uploadDir));
+
 // API Routes - Auth routes with strict rate limiting
 app.use('/api/v1/auth/login', authLimiter);
 app.use('/api/v1/auth/register', authLimiter);
@@ -122,6 +132,7 @@ app.use('/api/v1/addresses', addressRoutes);
 app.use('/api/v1/search', searchRoutes);
 app.use('/api/v1/business', businessRoutes);
 app.use('/api/v1/payments', paymentRoutes);
+app.use('/api/v1/uploads', uploadRoutes);
 
 // Error handling
 app.use(notFoundHandler);
