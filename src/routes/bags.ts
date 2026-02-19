@@ -404,6 +404,14 @@ router.patch('/:id', authenticate, requireRole('business'), async (req: Authenti
   delete updateData.id;
   delete updateData.restaurantId;
 
+  // Reset sold-out state when key fields are edited
+  if (updateData.quantityTotal !== undefined || updateData.pickupStart !== undefined || updateData.pickupEnd !== undefined) {
+    const current = await prisma.bag.findUnique({ where: { id }, select: { quantityTotal: true } });
+    const newTotal = updateData.quantityTotal ?? current?.quantityTotal ?? 0;
+    updateData.quantityRemaining = newTotal;
+    updateData.isSoldOut = false;
+  }
+
   const updated = await prisma.bag.update({
     where: { id },
     data: updateData,
