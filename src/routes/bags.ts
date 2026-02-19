@@ -52,6 +52,21 @@ router.get('/', optionalAuth, async (req: AuthenticatedRequest, res: Response) =
     where.restaurant.ratingAvg = { gte: Number(minRating) };
   }
 
+  // Bounding box pre-filter: eliminate restaurants outside maxDistance at DB level
+  // 1 degree latitude ≈ 111 km; 1 degree longitude ≈ 111 * cos(lat) km
+  const lat = Number(latitude);
+  const lng = Number(longitude);
+  if (!isNaN(lat) && !isNaN(lng)) {
+    const maxDist = Number(maxDistanceKm);
+    const latDelta = maxDist / 111;
+    const lngDelta = maxDist / (111 * Math.cos(lat * Math.PI / 180));
+    where.restaurant = {
+      ...where.restaurant,
+      latitude: { gte: lat - latDelta, lte: lat + latDelta },
+      longitude: { gte: lng - lngDelta, lte: lng + lngDelta },
+    };
+  }
+
   // Pickup time filter
   const now = new Date();
   if (pickupTime === 'now') {
@@ -123,9 +138,7 @@ router.get('/', optionalAuth, async (req: AuthenticatedRequest, res: Response) =
       })).map(f => f.bagId)
     : [];
 
-  // Transform and add calculated fields
-  const lat = Number(latitude);
-  const lng = Number(longitude);
+  // Transform and add calculated fields (lat/lng already parsed above for bounding box)
 
   let results = bags.map(bag => ({
     ...bag,
