@@ -67,14 +67,21 @@ const limiter = rateLimit({
 });
 app.use(limiter);
 
-// Strict rate limiting for auth endpoints
+// Rate limiting for login/register (strict — prevents brute force)
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5, // 5 attempts per 15 minutes
+  max: 10, // 10 attempts per 15 minutes
   message: { success: false, error: 'Too many authentication attempts. Please try again in 15 minutes.' },
   standardHeaders: true,
   legacyHeaders: false,
-  skipSuccessfulRequests: false,
+  skipSuccessfulRequests: true,
+});
+
+// Separate, more lenient limiter for token refresh (normal app behavior)
+const refreshLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minute
+  max: 10, // 10 refreshes per minute
+  message: { success: false, error: 'Too many refresh attempts, please try again later' },
 });
 
 // Body parsing
@@ -118,7 +125,7 @@ app.use('/uploads', express.static(uploadDir));
 // API Routes - Auth routes with strict rate limiting
 app.use('/api/v1/auth/login', authLimiter);
 app.use('/api/v1/auth/register', authLimiter);
-app.use('/api/v1/auth/refresh', authLimiter);
+app.use('/api/v1/auth/refresh', refreshLimiter);
 app.use('/api/v1/auth/social', authLimiter);
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/users', userRoutes);
