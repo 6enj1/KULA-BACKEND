@@ -165,6 +165,38 @@ async function gracefulShutdown(signal: string) {
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
+// Cleanup expired pending orders every 2 minutes
+const PENDING_ORDER_TTL_MINUTES = 10;
+setInterval(async () => {
+  try {
+    const cutoff = new Date(Date.now() - PENDING_ORDER_TTL_MINUTES * 60 * 1000);
+    const expired = await prisma.order.findMany({
+      where: { status: 'pending', createdAt: { lt: cutoff } },
+      select: { id: true, bagId: true, quantity: true },
+    });
+
+    for (const order of expired) {
+      await prisma.$transaction([
+        prisma.payment.deleteMany({ where: { orderId: order.id } }),
+        prisma.order.delete({ where: { id: order.id } }),
+        prisma.bag.update({
+          where: { id: order.bagId },
+          data: {
+            quantityRemaining: { increment: order.quantity },
+            isSoldOut: false,
+          },
+        }),
+      ]);
+    }
+
+    if (expired.length > 0) {
+      console.log(`[Cleanup] Expired ${expired.length} pending order(s)`);
+    }
+  } catch (err) {
+    console.error('[Cleanup] Error expiring pending orders:', err);
+  }
+}, 2 * 60 * 1000);
+
 // Start server
 const server = app.listen(PORT, () => {
   console.log(`
