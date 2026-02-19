@@ -54,8 +54,8 @@ app.set('trust proxy', 1);
 app.use(helmet());
 app.use(cors({
   origin: process.env.NODE_ENV === 'production'
-    ? ['https://your-app-domain.com']
-    : '*',
+    ? ['https://kula-dashboard.vercel.app']
+    : ['http://localhost:5173', 'https://kula-dashboard.vercel.app'],
   credentials: true,
 }));
 
