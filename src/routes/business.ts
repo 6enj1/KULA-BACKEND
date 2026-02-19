@@ -205,7 +205,89 @@ router.patch('/orders/:id/status', async (req: AuthenticatedRequest, res: Respon
   res.json({ success: true, data: updated });
 });
 
-// POST /api/v1/business/orders/:id/scan
+// POST /api/v1/business/orders/scan  (lookup by qrCode or orderNumber)
+router.post('/orders/scan', async (req: AuthenticatedRequest, res: Response) => {
+  const { qrCode } = req.body;
+
+  if (!qrCode) {
+    return res.status(400).json({ success: false, error: 'QR code is required' });
+  }
+
+  const restaurant = await prisma.restaurant.findUnique({
+    where: { ownerId: req.user!.sub },
+    select: { id: true },
+  });
+
+  if (!restaurant) {
+    return res.status(404).json({ success: false, error: 'Restaurant not found' });
+  }
+
+  // Find order by QR code or order number
+  let order = await prisma.order.findUnique({
+    where: { qrCode },
+    select: {
+      id: true,
+      restaurantId: true,
+      status: true,
+      orderNumber: true,
+      user: { select: { name: true } },
+      bag: { select: { title: true } },
+    },
+  });
+
+  if (!order) {
+    // Try by order number (e.g. KULA-JLTK6U)
+    order = await prisma.order.findUnique({
+      where: { orderNumber: qrCode },
+      select: {
+        id: true,
+        restaurantId: true,
+        status: true,
+        orderNumber: true,
+        user: { select: { name: true } },
+        bag: { select: { title: true } },
+      },
+    });
+  }
+
+  if (!order) {
+    return res.status(404).json({ success: false, error: 'Invalid QR code or order number' });
+  }
+
+  if (order.restaurantId !== restaurant.id) {
+    return res.status(403).json({ success: false, error: 'Order belongs to another restaurant' });
+  }
+
+  if (!['paid', 'ready'].includes(order.status)) {
+    return res.status(400).json({
+      success: false,
+      error: `Order cannot be collected (status: ${order.status})`,
+    });
+  }
+
+  // Mark as collected
+  const updated = await prisma.order.update({
+    where: { id: order.id },
+    data: {
+      status: 'collected',
+      qrScannedAt: new Date(),
+    },
+  });
+
+  res.json({
+    success: true,
+    data: {
+      id: updated.id,
+      orderNumber: order.orderNumber,
+      status: 'collected',
+      customerName: order.user.name,
+      bagTitle: order.bag.title,
+    },
+    message: 'Order marked as collected',
+  });
+});
+
+// POST /api/v1/business/orders/:id/scan (legacy, by order ID)
 router.post('/orders/:id/scan', async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;
   const { qrCode } = req.body;
@@ -287,7 +369,9 @@ router.get('/analytics', async (req: AuthenticatedRequest, res: Response) => {
   }
 
   const start = startDate ? new Date(String(startDate)) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-  const end = endDate ? new Date(String(endDate)) : new Date();
+  // When endDate is a date string like "2026-02-18", set to end of day so we include all orders from that day
+  const endRaw = endDate ? new Date(String(endDate)) : new Date();
+  const end = endDate ? new Date(endRaw.getTime() + 24 * 60 * 60 * 1000 - 1) : endRaw;
 
   // Get order stats
   const orders = await prisma.order.findMany({
@@ -303,15 +387,13 @@ router.get('/analytics', async (req: AuthenticatedRequest, res: Response) => {
     },
   });
 
+  const paidStatuses: ('paid' | 'ready' | 'collected')[] = ['paid', 'ready', 'collected'];
   const totalOrders = orders.length;
   const completedOrders = orders.filter(o => o.status === 'collected').length;
   const cancelledOrders = orders.filter(o => ['cancelled', 'refunded'].includes(o.status)).length;
-  const totalRevenue = orders
-    .filter(o => o.status === 'collected')
-    .reduce((sum, o) => sum + o.total, 0);
-  const platformFees = orders
-    .filter(o => o.status === 'collected')
-    .reduce((sum, o) => sum + o.platformFee, 0);
+  const paidOrders = orders.filter(o => paidStatuses.includes(o.status as any));
+  const totalRevenue = paidOrders.reduce((sum, o) => sum + o.total, 0);
+  const platformFees = paidOrders.reduce((sum, o) => sum + o.platformFee, 0);
   const netRevenue = totalRevenue - platformFees;
 
   // Get top bags
@@ -319,10 +401,10 @@ router.get('/analytics', async (req: AuthenticatedRequest, res: Response) => {
     by: ['bagId'],
     where: {
       restaurantId: restaurant.id,
-      status: 'collected',
+      status: { in: paidStatuses },
       createdAt: { gte: start, lte: end },
     },
-    _count: { id: true },
+    _count: true,
     _sum: { total: true },
     orderBy: { _count: { id: 'desc' } },
     take: 5,
@@ -332,6 +414,10 @@ router.get('/analytics', async (req: AuthenticatedRequest, res: Response) => {
     where: { id: { in: topBags.map(b => b.bagId) } },
     select: { id: true, title: true },
   });
+
+  const avgRating = restaurant
+    ? (await prisma.restaurant.findUnique({ where: { id: restaurant.id }, select: { ratingAvg: true } }))?.ratingAvg || 0
+    : 0;
 
   res.json({
     success: true,
@@ -344,19 +430,16 @@ router.get('/analytics', async (req: AuthenticatedRequest, res: Response) => {
         totalRevenue,
         platformFees,
         netRevenue,
-        avgOrderValue: completedOrders > 0 ? Math.round(totalRevenue / completedOrders) : 0,
-        avgRating: restaurant ? await prisma.restaurant.findUnique({
-          where: { id: restaurant.id },
-          select: { ratingAvg: true },
-        }).then(r => r?.ratingAvg || 0) : 0,
+        avgOrderValue: paidOrders.length > 0 ? Math.round(totalRevenue / paidOrders.length) : 0,
+        avgRating,
       },
       topBags: topBags.map(b => {
         const details = bagDetails.find(d => d.id === b.bagId);
         return {
           bagId: b.bagId,
           title: details?.title || 'Unknown',
-          orderCount: b._count.id,
-          revenue: b._sum.total || 0,
+          orderCount: b._count,
+          revenue: b._sum?.total || 0,
         };
       }),
     },
