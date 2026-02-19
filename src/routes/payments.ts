@@ -49,8 +49,9 @@ router.get('/yoco/success', async (req: Request, res: Response) => {
     // Verify payment status with Yoco
     if (order.payment?.stripePaymentIntentId) {
       const checkoutStatus = await yoco.getCheckoutStatus(order.payment.stripePaymentIntentId);
+      console.log(`[Payment] Yoco checkout status for order ${orderId}:`, JSON.stringify(checkoutStatus));
 
-      if (checkoutStatus.status === 'successful') {
+      if (checkoutStatus.status === 'succeeded' || checkoutStatus.status === 'completed') {
         // Update order and payment - inventory already reserved at order creation
         await prisma.$transaction([
           prisma.order.update({
@@ -125,9 +126,9 @@ router.get('/yoco/failure', async (req: Request, res: Response) => {
   return res.redirect(`${APP_SCHEME}payment/failed`);
 });
 
-// POST /api/v1/payments/yoco/webhook
+// POST /api/v1/payments/webhook (alias) & /api/v1/payments/yoco/webhook
 // Yoco sends payment confirmations here
-router.post('/yoco/webhook', async (req: Request, res: Response) => {
+const webhookHandler = async (req: Request, res: Response) => {
   const signature = req.headers['yoco-signature'] as string;
   const webhookSecret = process.env.YOCO_WEBHOOK_SECRET;
 
@@ -263,7 +264,10 @@ router.post('/yoco/webhook', async (req: Request, res: Response) => {
   } catch (error) {
     res.status(500).json({ error: 'Webhook processing failed' });
   }
-});
+};
+
+router.post('/yoco/webhook', webhookHandler);
+router.post('/webhook', webhookHandler);
 
 // GET /api/v1/payments/status/:orderId
 // Check payment status for an order
