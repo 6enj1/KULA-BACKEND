@@ -25,20 +25,7 @@ jobs:
               --network kula-net \
               --restart unless-stopped \
               -p 3000:3000 \
-              -e "DATABASE_URL=${{ secrets.DATABASE_URL }}" \
-              -e NODE_ENV=production \
-              -e PORT=3000 \
-              -e "JWT_SECRET=${{ secrets.JWT_SECRET }}" \
-              -e "JWT_REFRESH_SECRET=${{ secrets.JWT_REFRESH_SECRET }}" \
-              -e "YOCO_SECRET_KEY=${{ secrets.YOCO_SECRET_KEY }}" \
-              -e "YOCO_WEBHOOK_SECRET=${{ secrets.YOCO_WEBHOOK_SECRET }}" \
-              -e "GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}" \
-              -e "APPLE_BUNDLE_ID=${{ secrets.APPLE_BUNDLE_ID }}" \
-              -e "SMTP_HOST=${{ secrets.SMTP_HOST }}" \
-              -e "SMTP_PORT=${{ secrets.SMTP_PORT }}" \
-              -e "SMTP_USER=${{ secrets.SMTP_USER }}" \
-              -e "SMTP_PASS=${{ secrets.SMTP_PASS }}" \
-              -e "SMTP_FROM=${{ secrets.SMTP_FROM }}" \
+              --env-file /home/ec2-user/kula-backend/.env.production \
               kula-backend
             sleep 5
             curl -f http://localhost:3000/health || echo "Health check failed"
