@@ -33,6 +33,11 @@ jobs:
               -e "YOCO_WEBHOOK_SECRET=${{ secrets.YOCO_WEBHOOK_SECRET }}" \
               -e "GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}" \
               -e "APPLE_BUNDLE_ID=${{ secrets.APPLE_BUNDLE_ID }}" \
+              -e "SMTP_HOST=${{ secrets.SMTP_HOST }}" \
+              -e "SMTP_PORT=${{ secrets.SMTP_PORT }}" \
+              -e "SMTP_USER=${{ secrets.SMTP_USER }}" \
+              -e "SMTP_PASS=${{ secrets.SMTP_PASS }}" \
+              -e "SMTP_FROM=${{ secrets.SMTP_FROM }}" \
               kula-backend
             sleep 5
             curl -f http://localhost:3000/health || echo "Health check failed"

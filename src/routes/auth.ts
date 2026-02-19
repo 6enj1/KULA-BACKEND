@@ -388,8 +388,26 @@ async function findOrCreateUserByProvider(profile: ProviderProfile) {
 
 router.post('/register', validate(registerSchema), async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { email, password, name, role = 'consumer' } = req.body;
+    const { email, password, name, role = 'consumer', inviteCode } = req.body;
     // Validation handled by Zod schema
+
+    // Business registration requires a valid invite code
+    if (role === 'business') {
+      if (!inviteCode) {
+        throw new ApiError('An invite code is required for restaurant registration', 400);
+      }
+
+      const invite = await prisma.inviteCode.findUnique({ where: { code: inviteCode } });
+      if (!invite) {
+        throw new ApiError('Invalid invite code', 400);
+      }
+      if (invite.usedAt) {
+        throw new ApiError('This invite code has already been used', 400);
+      }
+      if (invite.expiresAt < new Date()) {
+        throw new ApiError('This invite code has expired', 400);
+      }
+    }
 
     // Check if user exists (use auth_identities as source of truth for providers)
     const existingUser = await prisma.user.findUnique({
@@ -504,6 +522,14 @@ router.post('/register', validate(registerSchema), async (req: AuthenticatedRequ
     });
 
     const { accessToken, refreshToken } = await generateAndStoreTokens(user, req);
+
+    // Mark invite code as used after successful business registration
+    if (role === 'business' && inviteCode) {
+      await prisma.inviteCode.update({
+        where: { code: inviteCode },
+        data: { usedAt: new Date(), usedByUserId: user.id },
+      });
+    }
 
     res.status(201).json({
       success: true,

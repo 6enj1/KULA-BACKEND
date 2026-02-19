@@ -616,6 +616,47 @@ model Notification {
 }
 
 // ============================================
+// PARTNER APPLICATIONS & INVITE CODES
+// ============================================
+
+enum ApplicationStatus {
+  pending
+  approved
+  rejected
+}
+
+model PartnerApplication {
+  id              String            @id @default(uuid())
+  businessName    String            @map("business_name")
+  contactName     String            @map("contact_name")
+  email           String
+  phone           String?
+  city            String
+  message         String?
+  status          ApplicationStatus @default(pending)
+  reviewedAt      DateTime?         @map("reviewed_at")
+  createdAt       DateTime          @default(now()) @map("created_at")
+
+  @@index([status])
+  @@index([createdAt(sort: Desc)])
+  @@map("partner_applications")
+}
+
+model InviteCode {
+  id            String    @id @default(uuid())
+  code          String    @unique
+  email         String
+  usedAt        DateTime? @map("used_at")
+  usedByUserId  String?   @map("used_by_user_id")
+  expiresAt     DateTime  @map("expires_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  @@index([code])
+  @@index([email])
+  @@map("invite_codes")
+}
+
+// ============================================
 // AUDIT LOGS
 // ============================================
 

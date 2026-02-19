@@ -43,6 +43,7 @@ export const registerSchema = z.object({
     .regex(/[!@#$%^&*(),.?":{}|<>]/, 'Password must contain at least one special character'),
   name: z.string().min(1, 'Name is required').max(100, 'Name too long'),
   role: z.enum(['consumer', 'business']).optional().default('consumer'),
+  inviteCode: z.string().optional(),
 });
 
 export const socialAuthSchema = z.object({

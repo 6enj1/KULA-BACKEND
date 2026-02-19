@@ -7,7 +7,13 @@ const globalForPrisma = globalThis as unknown as {
 };
 
 function createPrismaClient() {
-  const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+  const connectionString = (process.env.DATABASE_URL || '')
+    .replace(/[?&]sslmode=[^&]*/g, ''); // pg driver doesn't understand sslmode param
+  const isRDS = connectionString.includes('rds.amazonaws.com');
+  const pool = new Pool({
+    connectionString,
+    ssl: isRDS ? { rejectUnauthorized: false } : undefined,
+  });
   const adapter = new PrismaPg(pool);
   return new PrismaClient({
     adapter,
