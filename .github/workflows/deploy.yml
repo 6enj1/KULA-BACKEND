@@ -22,6 +22,7 @@ jobs:
             sudo docker rm -f kula-backend || true
             sudo docker run -d \
               --name kula-backend \
+              --network kula-net \
               --restart unless-stopped \
               -p 3000:3000 \
               -e "DATABASE_URL=${{ secrets.DATABASE_URL }}" \
