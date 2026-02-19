@@ -76,14 +76,25 @@ router.get('/', authenticate, validate(paginationSchema, 'query'), async (req: A
           createdAt: true,
         },
       },
+      payment: {
+        select: {
+          checkoutUrl: true,
+        },
+      },
     },
   });
 
   const total = await prisma.order.count({ where });
 
+  // Include paymentUrl for pending orders
+  const data = orders.map(({ payment, ...order }) => ({
+    ...order,
+    paymentUrl: order.status === 'pending' ? payment?.checkoutUrl : undefined,
+  }));
+
   res.json({
     success: true,
-    data: orders,
+    data,
     pagination: {
       page: Number(page),
       limit: Number(limit),
@@ -355,7 +366,7 @@ router.post('/', authenticate, validate(createOrderSchema), async (req: Authenti
       },
     });
 
-    // Save checkout ID to payment record
+    // Save checkout ID and URL to payment record
     await prisma.payment.create({
       data: {
         orderId: order.id,
@@ -363,6 +374,7 @@ router.post('/', authenticate, validate(createOrderSchema), async (req: Authenti
         method: 'card', // Yoco handles the actual method
         status: 'pending',
         stripePaymentIntentId: checkout.id, // Reusing field for Yoco checkout ID
+        checkoutUrl: checkout.redirectUrl,
       },
     });
 
@@ -467,6 +479,100 @@ router.post('/:id/cancel', authenticate, validate(cancelOrderSchema), async (req
   ]);
 
   res.json({ success: true, message: 'Order cancelled' });
+});
+
+// POST /api/v1/orders/:orderId/review
+router.post('/:orderId/review', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  const { orderId } = req.params;
+  const { rating, text } = req.body;
+
+  if (!rating || rating < 1 || rating > 5) {
+    return res.status(400).json({ success: false, error: 'Rating must be between 1 and 5' });
+  }
+
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    select: {
+      userId: true,
+      restaurantId: true,
+      status: true,
+      review: { select: { id: true } },
+    },
+  });
+
+  if (!order) {
+    return res.status(404).json({ success: false, error: 'Order not found' });
+  }
+
+  if (order.userId !== req.user!.sub) {
+    return res.status(403).json({ success: false, error: 'Not authorized' });
+  }
+
+  if (order.status !== 'collected') {
+    return res.status(400).json({ success: false, error: 'Can only review collected orders' });
+  }
+
+  // If review exists, update it instead
+  if (order.review) {
+    const updated = await prisma.review.update({
+      where: { id: order.review.id },
+      data: {
+        ...(rating && { rating }),
+        ...(text !== undefined && { text }),
+      },
+    });
+
+    // Recalculate restaurant rating
+    const stats = await prisma.review.aggregate({
+      where: { restaurantId: order.restaurantId, isVisible: true },
+      _avg: { rating: true },
+      _count: { rating: true },
+    });
+
+    await prisma.restaurant.update({
+      where: { id: order.restaurantId },
+      data: {
+        ratingAvg: stats._avg.rating || 0,
+        ratingCount: stats._count.rating,
+      },
+    });
+
+    return res.json({ success: true, data: updated });
+  }
+
+  // Create review
+  const review = await prisma.review.create({
+    data: {
+      orderId,
+      userId: req.user!.sub,
+      restaurantId: order.restaurantId,
+      rating,
+      text,
+    },
+  });
+
+  // Update restaurant rating
+  const stats = await prisma.review.aggregate({
+    where: { restaurantId: order.restaurantId, isVisible: true },
+    _avg: { rating: true },
+    _count: { rating: true },
+  });
+
+  await prisma.restaurant.update({
+    where: { id: order.restaurantId },
+    data: {
+      ratingAvg: stats._avg.rating || 0,
+      ratingCount: stats._count.rating,
+    },
+  });
+
+  // Award bonus loyalty points
+  await prisma.user.update({
+    where: { id: req.user!.sub },
+    data: { loyaltyPoints: { increment: 5 } },
+  });
+
+  res.status(201).json({ success: true, data: review });
 });
 
 export default router;

@@ -405,9 +405,10 @@ model Payment {
   method                 PaymentMethod
   status                 PaymentStatus @default(pending)
 
-  // Stripe
+  // Stripe / Yoco
   stripePaymentIntentId  String?       @map("stripe_payment_intent_id")
   stripeChargeId         String?       @map("stripe_charge_id")
+  checkoutUrl            String?       @map("checkout_url")
 
   // Card Details (masked)
   cardLast4              String?       @map("card_last4")
