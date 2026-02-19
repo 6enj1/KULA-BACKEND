@@ -24,7 +24,7 @@ interface YocoCheckoutResponse {
 
 interface YocoPaymentResponse {
   id: string;
-  status: 'successful' | 'failed' | 'pending';
+  status: 'succeeded' | 'completed' | 'failed' | 'pending';
   amount: number;
   currency: string;
   metadata?: Record<string, string>;
