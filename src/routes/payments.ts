@@ -129,7 +129,9 @@ router.get('/yoco/failure', async (req: Request, res: Response) => {
 // POST /api/v1/payments/webhook (alias) & /api/v1/payments/yoco/webhook
 // Yoco sends payment confirmations here
 const webhookHandler = async (req: Request, res: Response) => {
-  const signature = req.headers['yoco-signature'] as string;
+  const signature = req.headers['webhook-signature'] as string;
+  const webhookId = req.headers['webhook-id'] as string;
+  const webhookTimestamp = req.headers['webhook-timestamp'] as string;
   const webhookSecret = process.env.YOCO_WEBHOOK_SECRET;
 
   // Webhook signature validation is REQUIRED
@@ -137,19 +139,30 @@ const webhookHandler = async (req: Request, res: Response) => {
     return res.status(500).json({ error: 'Webhook not configured' });
   }
 
-  if (!signature) {
-    return res.status(401).json({ error: 'Missing signature' });
+  if (!signature || !webhookId || !webhookTimestamp) {
+    return res.status(401).json({ error: 'Missing webhook headers' });
+  }
+
+  // Reject if timestamp is more than 3 minutes old (replay protection)
+  const now = Math.floor(Date.now() / 1000);
+  if (Math.abs(now - parseInt(webhookTimestamp)) > 180) {
+    return res.status(401).json({ error: 'Webhook timestamp too old' });
   }
 
   const isValid = yoco.verifyWebhookSignature(
     JSON.stringify(req.body),
     signature,
+    webhookId,
+    webhookTimestamp,
     webhookSecret
   );
 
   if (!isValid) {
+    console.log('[Webhook] Signature verification failed');
     return res.status(401).json({ error: 'Invalid signature' });
   }
+
+  console.log('[Webhook] Signature verified, processing event:', req.body.type);
 
   const { type, payload } = req.body;
 

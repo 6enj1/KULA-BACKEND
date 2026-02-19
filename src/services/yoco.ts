@@ -105,23 +105,44 @@ export async function getCheckoutStatus(checkoutId: string): Promise<YocoPayment
 }
 
 /**
- * Verify webhook signature from Yoco
+ * Verify webhook signature from Yoco (Standard Webhooks format)
+ * Signed content = "${webhook-id}.${webhook-timestamp}.${body}"
+ * Secret is base64-encoded with "whsec_" prefix
+ * Signature is base64-encoded HMAC SHA256
  */
 export function verifyWebhookSignature(
   payload: string,
   signature: string,
+  webhookId: string,
+  webhookTimestamp: string,
   webhookSecret: string
 ): boolean {
   const crypto = require('crypto');
-  const expectedSignature = crypto
-    .createHmac('sha256', webhookSecret)
-    .update(payload)
-    .digest('hex');
 
-  return crypto.timingSafeEqual(
-    Buffer.from(signature),
-    Buffer.from(expectedSignature)
-  );
+  // Decode the secret (remove "whsec_" prefix, then base64 decode)
+  const secretBytes = Buffer.from(webhookSecret.replace('whsec_', ''), 'base64');
+
+  // Construct signed content
+  const signedContent = `${webhookId}.${webhookTimestamp}.${payload}`;
+
+  const expectedSignature = crypto
+    .createHmac('sha256', secretBytes)
+    .update(signedContent)
+    .digest('base64');
+
+  // Signature header may contain multiple sigs like "v1,<base64sig> v1,<base64sig>"
+  const signatures = signature.split(' ').map((s: string) => s.split(',')[1]);
+
+  return signatures.some((sig: string) => {
+    try {
+      return crypto.timingSafeEqual(
+        Buffer.from(sig, 'base64'),
+        Buffer.from(expectedSignature, 'base64')
+      );
+    } catch {
+      return false;
+    }
+  });
 }
 
 /**
