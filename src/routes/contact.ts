@@ -70,7 +70,7 @@ router.post('/', async (req: Request, res: Response) => {
   `;
 
   try {
-    await sendEmail('hello@kulasave.co.za', `[KULA Contact] ${subjectLabel} — ${name}`, html);
+    await sendEmail('hello@kulasave.co.za', `[KULA Contact] ${subjectLabel} — ${name}`, html, email);
     res.json({ success: true });
   } catch (error) {
     console.error('Failed to send contact email:', error);

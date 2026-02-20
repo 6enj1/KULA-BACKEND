@@ -12,12 +12,13 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-export async function sendEmail(to: string, subject: string, html: string) {
+export async function sendEmail(to: string, subject: string, html: string, replyTo?: string) {
   await transporter.sendMail({
     from: process.env.SMTP_FROM || 'KULA <noreply@kulasave.co.za>',
     to,
     subject,
     html,
+    ...(replyTo && { replyTo }),
   });
 }
 
