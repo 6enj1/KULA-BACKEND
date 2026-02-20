@@ -44,6 +44,7 @@ import businessRoutes from './routes/business';
 import paymentRoutes from './routes/payments';
 import uploadRoutes from './routes/uploads';
 import partnerRoutes from './routes/partners';
+import contactRoutes from './routes/contact';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -141,6 +142,15 @@ app.use('/api/v1/search', searchRoutes);
 app.use('/api/v1/business', businessRoutes);
 app.use('/api/v1/payments', paymentRoutes);
 app.use('/api/v1/uploads', uploadRoutes);
+
+// Contact form with rate limiting
+const contactLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5, // 5 messages per 15 minutes
+  message: { success: false, error: 'Too many messages. Please try again later.' },
+});
+app.use('/api/v1/contact', contactLimiter);
+app.use('/api/v1/contact', contactRoutes);
 
 // Partner routes with rate limiting on apply endpoint
 const partnerApplyLimiter = rateLimit({
